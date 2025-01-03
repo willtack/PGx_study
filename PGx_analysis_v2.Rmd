@@ -1,0 +1,629 @@
+title: "PGx_analysis"
+author: "William Tackett"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE,message=FALSE)
+library(dplyr)
+library(stats)
+library(readxl)
+library(survival)
+library(kableExtra)
+library(tableone)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(Matrix)
+library(car)
+```
+
+# Descriptive Data Analysis
+```{r}
+# read excel file
+data <- read_excel("/Users/will/Documents/Documents - Mac (2) 2/UM/Fall24/PGx_study/dataDEID_Analysis variables v3.xlsx")
+data.dict <- read_excel("/Users/will/Documents/Documents - Mac (2) 2/UM/Fall24/PGx_study/data/ConfirmatoryDPYDUGT1A1Testing_DataDictionary_FOR ANALYSIS.xlsx")
+```
+
+
+```{r, echo=FALSE}
+## recoding
+# recode Group as case_control, 1 --> 1 (case), 2 --> 0 (control)
+data$case_control <- as.factor(ifelse(data$Group == 1, 1, 0))
+# condense to two categories: single-agent vs multi-agent
+data$chemo_reg_condensed <- case_when(
+  data$chemo_regimen == "1"| data$chemo_regimen == "2" ~ "1",
+  data$chemo_regimen == "3"| data$chemo_regimen == "5" | data$chemo_regimen == "6" | data$chemo_regimen == "7" ~ "2",
+)
+data$chemo_reg_condensed <- as.factor(data$chemo_reg_condensed)
+data$race <- as.factor(data$race)
+#data$gender <- ifelse(data$gender == 2, 1, 0)
+data$gender <- as.factor(data$gender)
+data$ethnicity <- as.factor(data$ethnicity)
+#data$eligible_gene <- ifelse(data$eligible_gene == 2, 1, 0)
+data$eligible_gene <- as.factor(data$eligible_gene)
+#data$dpyd_as <- ifelse(data$eligible_gene == 1.5, 1, 0)
+data$dpyd_as <- as.factor(data$dpyd_as)
+data$cancer_type <- as.factor(data$cancer_type)
+data$cancer_stage_and_grade_fctr <- as.factor(data$cancer_stage_and_grade) 
+data$chemo_regimen <- as.factor(data$chemo_regimen)
+#data$Pair_ID <- as.factor(data$Pair_ID)
+data$TOX_grade3up_fctr <- as.factor(data$TOX_grade3up)
+```
+
+```{r}
+# Summarize main variables in data for Table 1
+# Specify the variables to include in Table 1
+vars <- c("age", "race", "gender", "eligible_gene", "dpyd_as", 
+          "cancer_type", "cancer_stage_and_grade_fctr", "chemo_reg_condensed")
+
+# Table 1 
+# Stratified by case/control (0 = case, 1 = control)
+table1 <- CreateTableOne(vars = vars, strata = "case_control", data = data, test = FALSE)
+#print(table1, format = "markdown", varLabels = TRUE)
+
+# Convert to a data frame for styling
+table1_df <- print(table1, quote = FALSE, noSpaces = TRUE, printToggle = FALSE)
+
+table1_df %>%
+  kable("html", caption = "Table 1: Data Summary", digits = 3) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed", "bordered"))
+```
+
+
+# Demographic variables
+**Demographic Variables** - Summary variables for the overall cohort and cases and controls, respectively; evaluate for differences between cases and controls
+   - **Age** (Variable name = `age`)
+   - **Race** (Variable name = `race`)
+   - **Ethnicity** (Variable name = `ethnicity`)
+   - **Eligible Gene** (Variable name = `eligible_gene`)
+   - **DPYD Activity Score** (Variable name = `dpyd_as`)
+   - **Cancer Type** (Variable name = `cancer_type`)
+   - **Cancer Stage** (Variable name = `cancer_stage_and_grade`)
+   - **Chemotherapy Regimen** (Variable name = `chemo_regimen`)
+
+# Assessing differences between cases and controls
+```{r, echo=FALSE, warning=FALSE}
+# evaluate demographic variables for differences between cases and controls 
+
+# test differences for age (continuous)
+age_cases <- data %>% filter(case_control == 0) %>% pull(age)
+age_controls <- data %>% filter(case_control == 1) %>% pull(age)
+t_test_age <- t.test(age_cases, age_controls)
+
+# test differences for race (categorical variable)
+race_table <- table(data$race, data$case_control)
+chisq_test_race <- chisq.test(race_table)
+
+# test differences for gender (categorical variable) using chi
+gender_table <- table(data$gender, data$case_control)
+chisq_test_gender <- chisq.test(gender_table)
+
+# test differences for 'ethnicity' (categorical variable)
+ethnicity_table <- table(data$ethnicity, data$case_control)
+chisq_test_ethnicity <- chisq.test(ethnicity_table)
+
+# test differences for 'eligible_gene' (categorical variable)
+eligible_gene_table <- table(data$eligible_gene, data$case_control)
+chisq_test_eligible_gene <- chisq.test(table(data$eligible_gene, data$case_control))
+
+# test differences for 'dpyd_as' (categorical variable)
+dpyd_as_table <- table(data$dpyd_as, data$case_control)
+chisq_test_dpyd_as <- chisq.test(table(data$dpyd_as, data$case_control))
+
+# test differences for 'cancer_type' (categorical variable)
+cancer_type_table <- table(data$cancer_type, data$case_control)
+chisq_test_cancer_type <- chisq.test(cancer_type_table)
+
+# test differences for 'cancer_stage_and_grade' (categorical variable)
+cancer_stage_table <- table(data$cancer_stage_and_grade_fctr, data$case_control)
+chisq_test_cancer_stage <- chisq.test(cancer_stage_table)
+
+# test differences for 'chemo_regimen' (categorical variable)
+chemo_regimen_table <- table(data$chemo_reg_condensed, data$case_control)
+chisq_test_chemo_regimen <- chisq.test(chemo_regimen_table)
+```
+
+
+```{r, echo=FALSE}
+# Capture results for demographic tests with rounding
+comparison_results <- data.frame(
+  Variable = c("Age", "Race", "Gender", "Eligible Gene", "DPYD Activity Score", "Cancer Type", "Cancer Stage and Grade", "Chemotherapy Regimen"),
+  Test = c("t-test", "Chi-square", "Chi-square", "Chi-square", "Chi-square", "Chi-square", "Chi-square", "Chi-square"),
+  Statistic = round(c(t_test_age$statistic, chisq_test_race$statistic,chisq_test_gender$statistic, 
+                      chisq_test_eligible_gene$statistic, chisq_test_dpyd_as$statistic, chisq_test_cancer_type$statistic, 
+                      chisq_test_cancer_stage$statistic, chisq_test_chemo_regimen$statistic), 3),
+  `p-value` = round(c(t_test_age$p.value, chisq_test_race$p.value, chisq_test_gender$p.value, 
+                      chisq_test_eligible_gene$p.value, chisq_test_dpyd_as$p.value, chisq_test_cancer_type$p.value, 
+                      chisq_test_cancer_stage$p.value, chisq_test_chemo_regimen$p.value), 3)
+)
+
+# Use kable to print the table with caption
+#kable(comparison_results, caption = "Table 2: Demographic Comparison Test Results")
+# Generate the table with `kableExtra`
+comparison_results %>%
+  kable("html", caption = "Table 2: Demographic Comparison Test Results", digits = 3) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed", "bordered"))
+```
+
+```{r, echo=FALSE}
+data$case_control <- factor(data$case_control, labels = c("Control", "Case"))
+data$gender <- factor(data$gender, labels = c("Female", "Male"))
+ggplot(data, aes(x = case_control, fill = gender)) +
+  geom_bar(position = "fill") + # Use 'position = "fill"' for proportions
+  scale_y_continuous(labels = scales::percent) + # Format y-axis as percentages
+  labs(
+    x = "Group",
+    y = "Proportion",
+    fill = "Gender",
+    title = "Gender Distribution by Case vs. Control"
+  ) +
+  theme_minimal()
+```
+
+```{r, echo=FALSE}
+# DPYD AS distribution by case vs. control
+ggplot(data, aes(x = case_control, fill = dpyd_as)) +
+  geom_bar(position = "fill") + # Use 'position = "fill"' for proportions
+  scale_y_continuous(labels = scales::percent) + # Format y-axis as percentages
+  labs(
+    x = "Group",
+    y = "Proportion",
+    fill = "DPYD AS",
+    title = "DYPD AS by Case vs. Control"
+  ) +
+  theme_minimal()
+
+```
+
+
+# **Primary Endpoint**: Incidence of >grade 3 toxicity among cases and controls
+   - Variable: `TOX_grade3up`
+   
++-------------------+-------------+----------------+--+--+
+|                   | CASE: EVENT | CASE: NO EVENT |  |  |
++-------------------+-------------+----------------+--+--+
+| CONTROL: EVENT    | a           | b              |  |  |
++-------------------+-------------+----------------+--+--+
+| CONTROL: NO EVENT | c           | d              |  |  |
++-------------------+-------------+----------------+--+--+
+
+
+\[
+\chi^2 = \frac{(b - c)^2}{b + c}
+\]
+
+# 12/23/2024: run the primary outcome with cases 3, 11, and  17 coded as “0” for the “TOX_grade3up”
+```{r}
+# recode cases 3, 11, and 17 as 0
+summary(data$TOX_grade3up)
+data$TOX_grade3up <- ifelse(data$record_id %in% c(3, 11, 17), 0, data$TOX_grade3up)
+summary(data$TOX_grade3up) # sanity check
+```
+
+
+### Visualize proportions of primary outcome
+```{r}
+tox_proportions <- data %>%
+  group_by(TOX_grade3up, case_control) %>%
+  summarise(count = n(), .groups = "drop") %>% # Ensures summarise doesn't retain grouping
+  group_by(case_control) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Plot
+ggplot(tox_proportions, aes(x = factor(case_control, labels = c("Control", "Case")), 
+                            y = percentage, 
+                            fill = factor(TOX_grade3up, labels = c("No Event", "Event")))) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(
+    x = "Group",
+    y = "Percentage",
+    fill = "Dose Toxicity",
+    title = "Grade 3+ Toxicity Occurrence by Case vs Control"
+  ) +
+  scale_fill_manual(values = c("skyblue", "salmon")) +
+  theme_minimal()
+```
+
+```{r}
+# filter eligibile gene = dypd
+tox_proportions2 <- data %>%
+  filter(eligible_gene == 1) %>%
+  group_by(TOX_grade3up, case_control) %>%
+  summarise(count = n(), .groups = "drop") %>% # Ensures summarise doesn't retain grouping
+  group_by(case_control) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Plot
+ggplot(tox_proportions2, aes(x = factor(case_control, labels = c("Control", "Case")), 
+                            y = percentage, 
+                            fill = factor(TOX_grade3up, labels = c("No Event", "Event")))) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(
+    x = "Group",
+    y = "Percentage",
+    fill = "Dose Toxicity",
+    title = "Grade 3+ Toxicity Occurrence by Case vs Control, DPYD Eligible"
+  ) +
+  scale_fill_manual(values = c("skyblue", "salmon")) +
+  theme_minimal()
+```
+```{r}
+# filter eligibile gene = utg1a1
+tox_proportions3 <- data %>%
+  filter(eligible_gene == 2) %>%
+  group_by(TOX_grade3up, case_control) %>%
+  summarise(count = n(), .groups = "drop") %>% # Ensures summarise doesn't retain grouping
+  group_by(case_control) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Plot
+ggplot(tox_proportions3, aes(x = factor(case_control, labels = c("Control", "Case")), 
+                            y = percentage, 
+                            fill = factor(TOX_grade3up, labels = c("No Event", "Event")))) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(
+    x = "Group",
+    y = "Percentage",
+    fill = "Dose Toxicity",
+    title = "Grade 3+ Toxicity Occurrence by Case vs Control, UTG1A1 Eligible"
+  ) +
+  scale_fill_manual(values = c("skyblue", "salmon")) +
+  theme_minimal()
+```
+
+Test proportions using clogit instead of McNemar's test, i.e.:
+$$\text{logit}(P(\text{TOX\_grade3up} = 1)) = \beta_0 + \beta_1 \cdot \text{case\_control} + \text{strata(Pair\_ID)}$$
+
+where:
+- $\text{TOX\_grade3up} \in \{0, 1\}$ represents the outcome (grade 3+ toxicity),
+- $\text{case\_control} \in \{0 \text{ (Case)}, 1 \text{ (Control)}\}$ is the predictor,
+- $\text{strata(Pair\_ID)}$ accounts for matched pairs.
+
+For the eligible gene groups:
+
+1. **DPYD Eligible Group**:
+   $$\text{logit}(P(\text{TOX\_grade3up} = 1)) = \beta_0 + \beta_1 \cdot \text{case\_control} + \text{strata(Pair\_ID)},$$
+   with $\text{eligible\_gene} = 1$.
+
+2. **UGT1A1 Eligible Group**:
+   $$\text{logit}(P(\text{TOX\_grade3up} = 1)) = \beta_0 + \beta_1 \cdot \text{case\_control} + \text{strata(Pair\_ID)},$$
+   with $\text{eligible\_gene} = 2$.
+
+
+
+```{r}
+# fit clogit models for all subjects and the two eligible gene groups and compile into a table
+model_all <- clogit(TOX_grade3up ~ case_control + strata(Pair_ID), data=data)
+model_dpyd <- clogit(TOX_grade3up ~ case_control + strata(Pair_ID), data=data %>% filter(eligible_gene == 1))
+model_ugt1a1 <- clogit(TOX_grade3up ~ case_control + strata(Pair_ID), data=data %>% filter(eligible_gene == 2))
+
+# OR and 95% CI
+m_all.OR.CI <- cbind("OR" = exp(coef(model_all)), exp(confint(model_all)))
+m_dpyd.OR.CI <- cbind("OR" = exp(coef(model_dpyd)), exp(confint(model_dpyd)))
+m_ugt1a1.OR.CI <- cbind("OR" = exp(coef(model_ugt1a1)), exp(confint(model_ugt1a1)))
+
+# Create a table with the results
+primary_outcome <- data.frame(
+  Model = c("All Subjects", "DPYD Eligible", "UGT1A1 Eligible"),
+  `OR` = c(m_all.OR.CI[1, 1], m_dpyd.OR.CI[1, 1], m_ugt1a1.OR.CI[1, 1]),
+  `2.5% CI` = c(m_all.OR.CI[1, 2], m_dpyd.OR.CI[1, 2], m_ugt1a1.OR.CI[1, 2]),
+  `97.5% CI` = c(m_all.OR.CI[1, 3], m_dpyd.OR.CI[1, 3], m_ugt1a1.OR.CI[1, 3])
+)
+
+# plot forest plot with results from primary_outcome
+ggplot(primary_outcome, aes(x = Model, y = OR, ymin = X2.5..CI, ymax = X97.5..CI)) +
+  geom_pointrange(color = "darkblue", size = 1) + # Points and confidence intervals
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") + # Reference line at OR = 1
+  coord_flip() + # Flip coordinates for a horizontal plot
+  labs(
+    title = "Forest Plot of Odds Ratios",
+    x = "Group",
+    y = "Odds Ratio (95% CI)"
+  ) +
+  theme_minimal()
+
+
+# create table with results from primary_outome
+kable(primary_outcome, caption = "Table 3: Primary Endpoints Clogit Results")
+```
+# Secondary Endpoints
+Calculate the percentages of dose reductions, delays, or discontinuation among cases and matched controls.
+   - **Drug Discontinuation** (Variable name = `drug_dc_fixed`)
+   - **Treatment Delay** (Variable name = `Tx_delay_fixed`)
+   - **Dose Change** (Variable name = `Dose_change_fixed`)
+   
+Assess each endpoint individually
+```{r}
+# i. compare “drug_dc” among all cases and controls
+
+# compare proportions of drug discontinuation among all cases and controls using conditional logistic regression
+drug_dc_prop_test <- clogit(drug_dc_fixed ~ case_control + strata(Pair_ID), data=data)
+summary(drug_dc_prop_test)
+```
+
+```{r}
+# Calculate proportions for each group
+drug_dc_proportions <- data %>%
+  group_by(drug_dc_fixed, case_control) %>%
+  summarise(count = n()) %>%
+  group_by(case_control) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Plot
+ggplot(drug_dc_proportions, aes(x = case_control, y = percentage, fill = factor(drug_dc_fixed))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Case vs Control", y = "Percentage", fill = "Drug Discontinuation") +
+  scale_fill_manual(values = c("skyblue", "salmon"), labels = c("No", "Yes")) +
+  scale_x_discrete(labels = c("0" = "Control", "1" = "Case")) + # Custom labels for x-axis 
+  theme_minimal() +
+  ggtitle("Drug Discontinuation by Case vs Control")
+
+```
+    
+```{r}
+# ii.compare “Tx_delay” among all cases and controls
+# compare proportions of treatment delay among all cases and controls using conditional logistic regression
+Tx_delay_prop_test <- clogit(Tx_delay_fixed ~ case_control + strata(Pair_ID), data=data)
+summary(Tx_delay_prop_test)
+```
+
+```{r}
+# Calculate proportions for each group
+treat_delay_proportions <- data %>%
+  group_by(Tx_delay_fixed, case_control) %>%
+  summarise(count = n()) %>%
+  group_by(case_control) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Plot
+ggplot(treat_delay_proportions, aes(x = case_control, y = percentage, fill = factor(Tx_delay_fixed))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Case vs Control", y = "Percentage", fill = "Treatment Delay") +
+  scale_fill_manual(values = c("skyblue", "salmon"), labels = c("No Delay", "Delay")) +
+  scale_x_discrete(labels = c("0" = "Control", "1" = "Case")) + # Custom labels for x-axis
+  theme_minimal() +
+  ggtitle("Treatment Delay by Case vs Control")    
+```    
+  
+```{r}
+# iii. compare “Dose_change” among all cases and controls
+# compare proportions of dose change among all cases and controls using conditional logistic regression
+dose_change_prop_test <- clogit(Dose_change_fixed ~ case_control + strata(Pair_ID), data=data)
+summary(dose_change_prop_test)
+```
+
+```{r}
+# Calculate proportions for each group
+dose_change_proportions <- data %>%
+  group_by(Dose_change_fixed, case_control) %>%
+  summarise(count = n()) %>%
+  group_by(case_control) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Plot
+ggplot(dose_change_proportions, aes(x = case_control, y = percentage, fill = factor(Dose_change_fixed))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Case vs Control", y = "Percentage", fill = "Dose Change") +
+  scale_fill_manual(values = c("skyblue", "salmon"), labels = c("No Change", "Change")) +
+  scale_x_discrete(labels = c("0" = "Control", "1" = "Case")) + # Custom labels for x-axis
+  theme_minimal() +
+  ggtitle("Dose Change by Case vs Control")
+```
+
+
+```{r}
+# Create a summary table for secondary endpoint comparisons
+secondary_endpoints <- data.frame(
+  Endpoint = c("Drug Discontinuation", "Treatment Delay", "Dose Change"),
+  `Test Statistic` = round(c(
+    anova(drug_dc_prop_test)$Chisq[2],
+    anova(Tx_delay_prop_test)$Chisq[2],
+    anova(dose_change_prop_test)$Chisq[2]
+  ), 3),
+  `p-value` = round(c(
+    anova(drug_dc_prop_test)$Pr[2],
+    anova(Tx_delay_prop_test)$Pr[2],
+    anova(dose_change_prop_test)$Pr[2]
+  ), 3)
+)
+
+kable(secondary_endpoints, caption = "Secondary Endpoints Clogit/LRT Results")
+```
+
+```{r}
+# OR and 95% CI
+m_drugdc.OR.CI <- cbind("OR" = exp(coef(drug_dc_prop_test)), exp(confint(drug_dc_prop_test)))
+m_delay.OR.CI <- cbind("OR" = exp(coef(Tx_delay_prop_test)), exp(confint(Tx_delay_prop_test)))
+m_dosechange.OR.CI <- cbind("OR" = exp(coef(dose_change_prop_test)), exp(confint(dose_change_prop_test)))
+
+# Create a table with the results
+secondary_outcome <- data.frame(
+  Outcome = c("Drug discontinuation", "Treatment delay", "Dose change"),
+  `OR` = c(m_drugdc.OR.CI[1, 1], m_delay.OR.CI[1, 1], m_dosechange.OR.CI[1, 1]),
+  `2.5% CI` = c(m_drugdc.OR.CI[1, 2], m_delay.OR.CI[1, 2], m_dosechange.OR.CI[1, 2]),
+  `97.5% CI` = c(m_drugdc.OR.CI[1, 3], m_delay.OR.CI[1, 3], m_dosechange.OR.CI[1, 3])
+)
+
+# plot forest plot with results from secondary_outcome
+# plot forest plot with results from primary_outcome
+ggplot(secondary_outcome, aes(x = Outcome, y = OR, ymin = X2.5..CI, ymax = X97.5..CI)) +
+  geom_pointrange(color = "darkblue", size = 1) + # Points and confidence intervals
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") + # Reference line at OR = 1
+  coord_flip() + # Flip coordinates for a horizontal plot
+  labs(
+    title = "Forest Plot of Odds Ratios",
+    x = "Outcome",
+    y = "Odds Ratio (95% CI)"
+  ) +
+  theme_minimal()
+
+# create table with results from secondary_outome
+kable(secondary_outcome, caption = "Table 4: Secondary Endpoints Clogit Results")
+```
+
+
+# Conditional Logistic Regression
+Conditional logistic regression will be used to model the likelihood of any grade 3 or higher AE and SAE as a function of gender and cancer diagnosis
+
+```{r}
+# i. Fit a conditional logistic regression model for all cases and controls
+# Exclude observations whose eligible_gene is 2 (UG1A1)
+model_data <- data %>% filter(eligible_gene != 2)
+
+model1 <- clogit(TOX_grade3up ~ case_control + gender + dpyd_as + strata(Pair_ID), data=model_data)
+
+# post-model
+summary(model1)
+# OR and 95% CI
+m1.OR.CI <- cbind("OR" = exp(coef(model1)), exp(confint(model1)))
+```
+
+```{r}
+# Generate regression table for Model 1
+model1_results <- summary(model1)$coef
+model1_or_ci <- round(cbind("OR" = exp(model1_results[, "coef"]), exp(confint(model1))), 3)
+model1_table <- as.data.frame(model1_or_ci)
+colnames(model1_table) <- c("Odds Ratio", "2.5% CI", "97.5% CI")
+# Create a kable table with borders, formatted for easy copying
+kable(model1_table, caption = "Table 5a: Conditional Logistic Regression Results (Model 1)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "bordered"),
+                full_width = FALSE, position = "center")
+```
+
+```{r}
+model2 <- clogit(TOX_grade3up ~ case_control + gender + dpyd_as + chemo_reg_condensed + strata(Pair_ID), data=model_data)
+
+# post-model
+summary(model2)
+# OR and 95% CI
+m2.OR.CI <- cbind("OR" = exp(coef(model2)), exp(confint(model2)))
+```
+
+```{r}
+table(model_data$chemo_reg_condensed, model_data$Pair_ID)
+with(model_data, table(chemo_reg_condensed, TOX_grade3up))
+```
+
+
+```{r}
+# Generate regression table for Model 2
+model2_results <- summary(model2)$coef
+model2_or_ci <- round(cbind("OR" = exp(model2_results[, "coef"]), exp(confint(model2))), 3)
+model2_table <- as.data.frame(model2_or_ci)
+colnames(model2_table) <- c("Odds Ratio", "2.5% CI", "97.5% CI")
+
+# Create a kable table with borders, formatted for easy copying
+kable(model2_table, caption = "Table 5b: Conditional Logistic Regression Results (Model 2)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "bordered"),
+                full_width = FALSE, position = "center")
+```
+
+
+```{r}
+model3 <- clogit(TOX_grade3up ~ case_control + gender + dpyd_as + chemo_reg_condensed + cancer_stage_and_grade + strata(Pair_ID), data=model_data)
+
+# post-model
+summary(model3)
+# OR and 95% CI
+m3.OR.CI <- cbind("OR" = exp(coef(model3)), exp(confint(model3)))
+#round(m3.OR.CI, 3)
+```
+
+```{r echo=FALSE}
+# Generate regression table for Model 3
+model3_results <- summary(model3)$coef
+model3_or_ci <- round(cbind("OR" = exp(model3_results[, "coef"]), exp(confint(model3))), 3)
+model3_table <- as.data.frame(model3_or_ci)
+colnames(model3_table) <- c("Odds Ratio", "2.5% CI", "97.5% CI")
+
+# Create a kable table with borders, formatted for easy copying
+kable(model3_table, caption = "Table 5c: Conditional Logistic Regression Results (Model 3)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "bordered"),
+                full_width = FALSE, position = "center")
+```
+
+
+```{r}
+# likelihood ratio tests for model comparison
+anova(model2, model3)
+```
+```{r}
+# Correlation matrix for model 2
+predictors2 <- model.matrix(model2)[, -1] # Remove intercept
+cor_matrix2 <- cor(predictors2)
+
+
+# Convert the correlation matrix into a data frame
+cor_table <- as.data.frame(round(cor_matrix2, 2)) # Round to 2 decimal places
+
+# Display the table nicely
+knitr::kable(
+  cor_table,
+  caption = "Correlation Matrix of Predictors in Model 2"
+) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+
+# Condition index for model 2
+eigen_values2 <- eigen(crossprod(predictors2))$values
+condition_index2 <- sqrt(max(eigen_values2) / eigen_values2)
+condition_index2
+```
+
+```{r}
+# Correlation matrix for model 3
+predictors3 <- model.matrix(model3)[, -1] # Remove intercept
+cor_matrix3 <- cor(predictors3)
+
+# Convert the correlation matrix into a data frame
+cor_table <- as.data.frame(round(cor_matrix3, 2)) # Round to 2 decimal places
+
+# Display the table nicely
+knitr::kable(
+  cor_table,
+  caption = "Correlation Matrix of Predictors in Model 3"
+) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+
+# Condition index for model 3
+eigen_values3 <- eigen(crossprod(predictors3))$values
+condition_index3 <- sqrt(max(eigen_values3) / eigen_values3)
+condition_index3
+```
+
+```{r}
+# Deviance residuals
+residuals_clogit <- residuals(model3, type = "deviance")
+
+# Fitted values
+fitted_values <- predict(model3, type = "risk")
+
+# Residuals vs. fitted plot
+plot(fitted_values, residuals_clogit, pch = 19, col = "blue",
+     main = "Residuals vs Fitted Values",
+     xlab = "Fitted Values", ylab = "Deviance Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+```
+
+```{r}
+# Condition Index scree plot
+# Compute condition indices
+eigen_values <- eigen(crossprod(model.matrix(model3)[, -1]))$values
+condition_indices <- sqrt(max(eigen_values) / eigen_values)
+
+# Plot condition indices
+plot(condition_indices, type = "b", pch = 19, col = "blue",
+     main = "Condition Indices",
+     xlab = "Index", ylab = "Condition Index")
+abline(h = 30, col = "red", lty = 2) # Threshold for multicollinearity
+```
+
+
+
